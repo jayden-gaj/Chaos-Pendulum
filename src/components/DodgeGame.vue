@@ -9,38 +9,39 @@ const stage = ref(1) // 1 = double, 2 = triple
 const health = ref(HEALTH_MAX)
 const healthActive = ref(false)
 
-const WIDTH = 720
-const HEIGHT = 520
-const BOB_RADIUS = 14
-const CURSOR_RADIUS = 7
-const GRAVITY = 800
-const SUBSTEPS = 8
-const FRAME_DT = 1 / 60
-const UPGRADE_AT = 10 // seconds
-const WALLS_AT = 20 // seconds
-const WALL_PERIOD = 8 // seconds per in-and-out cycle
-const WALL_MAX = 90 // max intrusion in px
-const HEALTH_AT = 30 // seconds — pickup system activates
-const HEALTH_MAX = 5 // seconds of health per pickup
-const PICKUP_RADIUS = 10
+const WIDTH = 720 // px
+const HEIGHT = 520 // px
+const BOB_RADIUS = 14 // px
+const CURSOR_RADIUS = 7 // px
+const GRAVITY = 800 // px/s²
+const SUBSTEPS = 8 // physics steps per frame (dimensionless)
+const FRAME_DT = 1 / 60 // s
+const UPGRADE_AT = 10 // s
+const WALLS_AT = 20 // s
+const WALL_PERIOD = 8 // s per in-and-out cycle
+const WALL_MAX = 90 // px — max intrusion
+const HEALTH_AT = 30 // s — pickup system activates
+const HEALTH_MAX = 5 // s of health per pickup
+const PICKUP_RADIUS = 10 // px
 
-const CENTER = { x: WIDTH / 2, y: HEIGHT / 2 }
+const CENTER = { x: WIDTH / 2, y: HEIGHT / 2 } // px
 
 // Pivots arranged as an equilateral triangle around the arena center.
-const PIVOT_RADIUS = 150
-const PIVOT_ANGLES = [-Math.PI / 2, Math.PI / 6, (5 * Math.PI) / 6]
+const PIVOT_RADIUS = 150 // px
+const PIVOT_ANGLES = [-Math.PI / 2, Math.PI / 6, (5 * Math.PI) / 6] // rad
 function pivotAt(i) {
   return {
     ax: CENTER.x + PIVOT_RADIUS * Math.cos(PIVOT_ANGLES[i]),
     ay: CENTER.y + PIVOT_RADIUS * Math.sin(PIVOT_ANGLES[i]),
   }
 }
+// L: segment lengths (px), m: bob masses (kg, arbitrary units)
 const CONFIGS = [
   { ...pivotAt(0), L: [90, 90], m: [3, 3] },
   { ...pivotAt(1), L: [120, 110], m: [4, 4] },
   { ...pivotAt(2), L: [80, 95], m: [3, 3] },
 ]
-const THIRD_SEGMENT = { L: 70, m: 2 }
+const THIRD_SEGMENT = { L: 70, m: 2 } // L: px, m: kg
 
 let canvas
 let ctx
@@ -180,7 +181,7 @@ function makePendulum(cfg, seed) {
   }
 }
 
-const PICKUP_SPEED = 90
+const PICKUP_SPEED = 90 // px/s
 
 function spawnPickup() {
   const margin = 30
