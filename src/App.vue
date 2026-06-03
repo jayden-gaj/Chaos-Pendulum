@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import ChaosPendulum from './components/ChaosPendulum.vue'
 import DodgeGame from './components/DodgeGame.vue'
+import InfoTab from './components/InfoTab.vue'
 
 const tab = ref('sim')
 </script>
@@ -10,9 +11,18 @@ const tab = ref('sim')
   <nav class="tabs">
     <button :class="{ active: tab === 'sim' }" @click="tab = 'sim'">Simulator</button>
     <button :class="{ active: tab === 'game' }" @click="tab = 'game'">Dodge Game</button>
+    <button :class="{ active: tab === 'info' }" @click="tab = 'info'">Info</button>
   </nav>
   <ChaosPendulum v-if="tab === 'sim'" />
-  <DodgeGame v-else />
+  <DodgeGame v-else-if="tab === 'game'" />
+  <InfoTab v-else />
+  <footer class="footer">
+    <div class="footer-center">
+        <p style="font-weight: bold; font-size: 1.1rem;">AP Physics C Final Project 2026</p>
+        <p>Ethan Hoffman</p>
+        <p>Jayden Gajewski</p>
+    </div>
+  </footer>
 </template>
 
 <style scoped>
@@ -41,4 +51,26 @@ const tab = ref('sim')
   color: #0b0d12;
   border-color: transparent;
 }
+.footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem 2rem;
+    margin-top: 3rem;
+    background: #1f2937;
+    border-top: 1px solid #ddd;
+    color: #ffffff;
+    font-size: 0.95rem;
+}
+
+.footer-center {
+    flex: 1;
+    text-align: center;
+}
+
+.footer-center p
+{
+    margin: 0.25rem 0;
+}
+
 </style>

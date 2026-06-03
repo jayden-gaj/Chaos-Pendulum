@@ -12,9 +12,21 @@ const BOB_RADIUS = 14
 const SCENE_PAD = 12 // gap between max reach and canvas edge
 const GRAVITY = 800 // px/s²
 
-const CHART_W = 260
-const CHART_H = 200
+const CHART_W = 340
+const CHART_H = 260
 const THETA_RANGE = Math.PI
+
+const axisOptions = [
+  { value: 'theta1', label: 'Angle 1 (rad)' },
+  { value: 'theta2', label: 'Angle 2 (rad)' },
+  { value: 'omega1', label: 'Velocity 1 (rad/s)' },
+  { value: 'omega2', label: 'Velocity 2 (rad/s)' },
+  { value: 'time', label: 'Time (s)' },
+  { value: 'energy', label: 'Energy' },
+]
+
+const xAxis = ref('theta1')
+const yAxis = ref('omega1')
 
 // User-tunable parameters. Applied on Reset.
 const rodLen1 = ref(160)
@@ -43,8 +55,9 @@ let dragging = null // 'bob1' | 'bob2' | null
 
 // Phase plot data.
 const SAMPLE_LIMIT = 20000
-const phaseSamples = [] // { theta1, omega1, theta2, omega2 }
+const phaseSamples = [] // { time, theta1, omega1, theta2, omega2, energy }
 let omegaScale = 0.5
+let simTime = 0
 
 // ─────────────────────────────────────────────────────────────
 // Physics — double pendulum equations of motion, RK4-integrated.
@@ -113,6 +126,29 @@ function getPositions() {
   return { bob1, bob2 }
 }
 
+function computeEnergy() {
+  const s = getRenderScale()
+  const L1 = rodLen1.value * s
+  const L2 = rodLen2.value * s
+  const m1 = mass1.value
+  const m2 = mass2.value
+
+  const x1 = L1 * Math.sin(theta1)
+  const y1 = L1 * Math.cos(theta1)
+  const x2 = x1 + L2 * Math.sin(theta2)
+  const y2 = y1 + L2 * Math.cos(theta2)
+
+  const v1x = L1 * omega1 * Math.cos(theta1)
+  const v1y = -L1 * omega1 * Math.sin(theta1)
+  const v2x = v1x + L2 * omega2 * Math.cos(theta2)
+  const v2y = v1y - L2 * omega2 * Math.sin(theta2)
+
+  const kinetic = 0.5 * m1 * (v1x * v1x + v1y * v1y) + 0.5 * m2 * (v2x * v2x + v2y * v2y)
+  const potential = GRAVITY * (m1 * (HEIGHT / 2 - y1) + m2 * (HEIGHT / 2 - y2)) / 100
+
+  return kinetic + potential
+}
+
 // ─────────────────────────────────────────────────────────────
 // Build / teardown
 // ─────────────────────────────────────────────────────────────
@@ -146,6 +182,7 @@ function build() {
   theta2 = a
   omega1 = 0
   omega2 = 0
+  simTime = 0
   lastTip = null
 
   mainCanvas.addEventListener('pointerdown', onPointerDown)
@@ -193,6 +230,7 @@ function loop() {
       theta2 = next[2]
       omega2 = next[3]
     }
+    simTime += FRAME_DT
     samplePhase()
   }
   render()
@@ -200,7 +238,14 @@ function loop() {
 }
 
 function samplePhase() {
-  phaseSamples.push({ theta1, omega1, theta2, omega2 })
+  phaseSamples.push({
+    time: simTime,
+    theta1,
+    theta2,
+    omega1,
+    omega2,
+    energy: computeEnergy(),
+  })
   if (phaseSamples.length > SAMPLE_LIMIT) phaseSamples.shift()
   omegaScale = Math.max(
     omegaScale,
@@ -298,6 +343,7 @@ function onPointerUp() {
   if (!dragging) return
   omega1 = 0
   omega2 = 0
+  simTime = 0
   lastTip = null
   trailCtx?.clearRect(0, 0, WIDTH, HEIGHT)
   phaseSamples.length = 0
@@ -320,6 +366,7 @@ function reset() {
   theta2 = a
   omega1 = 0
   omega2 = 0
+  simTime = 0
   lastTip = null
   trailCtx?.clearRect(0, 0, WIDTH, HEIGHT)
   phaseSamples.length = 0
@@ -332,17 +379,69 @@ function reset() {
 // Phase chart
 // ─────────────────────────────────────────────────────────────
 
-function projectTheta(theta) {
-  return ((theta + THETA_RANGE) / (2 * THETA_RANGE)) * CHART_W
+function getAxisLabel(key) {
+  return axisOptions.find((item) => item.value === key)?.label || key
 }
-function projectOmega(omega) {
-  const norm = (omega + omegaScale) / (2 * omegaScale)
-  return CHART_H - norm * CHART_H
+
+function getAxisValue(sample, key) {
+  switch (key) {
+    case 'theta1':
+      return sample.theta1
+    case 'theta2':
+      return sample.theta2
+    case 'omega1':
+      return sample.omega1
+    case 'omega2':
+      return sample.omega2
+    case 'time':
+      return sample.time
+    case 'energy':
+      return sample.energy
+    default:
+      return 0
+  }
+}
+
+function getAxisRange(key) {
+  const values = phaseSamples.map((sample) => getAxisValue(sample, key))
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+
+  if (Math.abs(max - min) < 1e-6) {
+    return { min: min - 1, max: max + 1 }
+  }
+
+  return { min, max }
+}
+
+function projectValue(value, key, range) {
+  if (key === 'theta1' || key === 'theta2') {
+    const span = range.max - range.min
+    return ((value - range.min) / span) * CHART_W
+  }
+
+  if (key === 'time' || key === 'energy') {
+    const span = range.max - range.min
+    return ((value - range.min) / span) * CHART_W
+  }
+
+  const span = range.max - range.min
+  return ((value - range.min) / span) * CHART_W
+}
+
+function projectY(value, key, range) {
+  const span = range.max - range.min
+  const normalized = span === 0 ? 0.5 : (value - range.min) / span
+  return CHART_H - normalized * CHART_H
 }
 
 function drawCharts() {
   if (!chartCtx) return
   const ctx = chartCtx
+  const xKey = xAxis.value
+  const yKey = yAxis.value
+  const xRange = getAxisRange(xKey)
+  const yRange = getAxisRange(yKey)
 
   ctx.fillStyle = '#0b0d12'
   ctx.fillRect(0, 0, CHART_W, CHART_H)
@@ -350,16 +449,7 @@ function drawCharts() {
   ctx.strokeStyle = '#374151'
   ctx.lineWidth = 1
   ctx.beginPath()
-  ctx.moveTo(CHART_W / 2, 0)
-  ctx.lineTo(CHART_W / 2, CHART_H)
-  ctx.moveTo(0, CHART_H / 2)
-  ctx.lineTo(CHART_W, CHART_H / 2)
-  ctx.stroke()
-
-  ctx.strokeStyle = '#1f2937'
-  ctx.beginPath()
   for (let i = 1; i < 4; i++) {
-    if (i === 2) continue
     ctx.moveTo((CHART_W / 4) * i, 0)
     ctx.lineTo((CHART_W / 4) * i, CHART_H)
     ctx.moveTo(0, (CHART_H / 4) * i)
@@ -368,36 +458,29 @@ function drawCharts() {
   ctx.stroke()
 
   if (phaseSamples.length > 1) {
-    drawTrajectory(ctx, 'theta1', 'omega1', [65, 184, 131])
-    drawTrajectory(ctx, 'theta2', 'omega2', [255, 126, 95])
+    drawTrajectory(ctx, xKey, yKey, xRange, yRange, [65, 184, 131])
   }
 
   ctx.font = '11px system-ui, sans-serif'
   ctx.fillStyle = '#9ca3af'
-  ctx.fillText('θ', 8, 16)
+  ctx.textAlign = 'left'
+  ctx.fillText(getAxisLabel(xKey), 8, 14)
   ctx.save()
   ctx.translate(14, CHART_H / 2)
   ctx.rotate(-Math.PI / 2)
   ctx.textAlign = 'center'
-  ctx.fillText('dθ/dt', 0, -4)
+  ctx.fillText(getAxisLabel(yKey), 0, -4)
   ctx.restore()
-
-  ctx.textAlign = 'right'
-  ctx.fillStyle = '#41b883'
-  ctx.fillText('■ upper', CHART_W - 56, 16)
-  ctx.fillStyle = '#ff7e5f'
-  ctx.fillText('■ lower', CHART_W - 8, 16)
-  ctx.textAlign = 'left'
 }
 
-function drawTrajectory(ctx, thetaKey, omegaKey, rgb) {
+function drawTrajectory(ctx, xKey, yKey, xRange, yRange, rgb) {
   ctx.strokeStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
   ctx.lineWidth = 1.2
   ctx.beginPath()
   for (let i = 0; i < phaseSamples.length; i++) {
-    const s = phaseSamples[i]
-    const x = projectTheta(s[thetaKey])
-    const y = projectOmega(s[omegaKey])
+    const sample = phaseSamples[i]
+    const x = projectValue(getAxisValue(sample, xKey), xKey, xRange)
+    const y = projectY(getAxisValue(sample, yKey), yKey, yRange)
     if (i === 0) ctx.moveTo(x, y)
     else ctx.lineTo(x, y)
   }
@@ -405,13 +488,7 @@ function drawTrajectory(ctx, thetaKey, omegaKey, rgb) {
   const latest = phaseSamples[phaseSamples.length - 1]
   ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
   ctx.beginPath()
-  ctx.arc(
-    projectTheta(latest[thetaKey]),
-    projectOmega(latest[omegaKey]),
-    3,
-    0,
-    Math.PI * 2
-  )
+  ctx.arc(projectValue(getAxisValue(latest, xKey), xKey, xRange), projectY(getAxisValue(latest, yKey), yKey, yRange), 3, 0, Math.PI * 2)
   ctx.fill()
 }
 
@@ -426,11 +503,25 @@ onBeforeUnmount(teardown)
       <div ref="sceneRef" class="scene" :style="{ width: WIDTH + 'px', height: HEIGHT + 'px' }" />
       <aside class="sidebar">
         <div class="panel">
-          <h2>Phase space</h2>
+          <h2>Graph</h2>
+          <div class="axis-pickers">
+            <label>
+              X axis
+              <select v-model="xAxis">
+                <option v-for="option in axisOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label>
+              Y axis
+              <select v-model="yAxis">
+                <option v-for="option in axisOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+          </div>
           <div class="chart">
             <canvas ref="chartRef" :width="CHART_W" :height="CHART_H" />
           </div>
-          <p class="panel-note">dθ/dt vs θ — upper (green), lower (orange).</p>
+          <p class="panel-note">Pick any x and y axes to explore the motion.</p>
         </div>
         <div class="params">
           <fieldset>
@@ -455,6 +546,7 @@ onBeforeUnmount(teardown)
         <p class="subtle">Drag a bob to reposition. Parameter changes apply on Reset.</p>
       </aside>
     </div>
+    
   </div>
 </template>
 
@@ -470,7 +562,7 @@ onBeforeUnmount(teardown)
 }
 h1 {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 2rem;
 }
 .stage {
   display: flex;
@@ -483,8 +575,8 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  min-width: 280px;
-  max-width: 300px;
+  min-width: 310px;
+  max-width: 360px;
   flex-shrink: 0;
 }
 .scene {
@@ -520,11 +612,33 @@ h1 {
 }
 .chart canvas {
   display: block;
+  width: 100%;
+  height: auto;
 }
 .panel-note {
   margin: 0;
   color: #6b7280;
   font-size: 0.7rem;
+}
+.axis-pickers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.axis-pickers label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: #d1d5db;
+}
+.axis-pickers select {
+  background: #0b0d12;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  padding: 0.25rem 0.35rem;
+  font: inherit;
 }
 .params {
   display: flex;
