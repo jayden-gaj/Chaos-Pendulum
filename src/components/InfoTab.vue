@@ -1,116 +1,386 @@
-<script setup> </script>
+<script setup>
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
+function typesetMath() {
+  if (typeof window === 'undefined' || !window.MathJax?.typesetPromise) return
+
+  const target = infoPanelRef.value || document.querySelector('.info-panel')
+  if (!target) return
+
+  window.MathJax.typesetPromise([target]).catch(() => {})
+}
+
+const infoPanelRef = ref(null)
+const canvasRef = ref(null)
+const numPendulums = ref(2)
+const angleSpread = ref(.001)
+const isRunning = ref(false)
+
+const WIDTH = 360
+const HEIGHT = 280
+const DPR = Math.min(window.devicePixelRatio || 1, 2)
+const GRAVITY = 820
+const ROD_LEN_1 = 78
+const ROD_LEN_2 = 62
+const BOB_RADIUS = 7
+
+let ctx = null
+let rafId = null
+let pendulums = []
+
+function derivs(state) {
+  const [theta1, omega1, theta2, omega2] = state
+  const m1 = 4
+  const m2 = 4
+  const L1 = ROD_LEN_1
+  const L2 = ROD_LEN_2
+  const g = GRAVITY
+  const d = theta1 - theta2
+  const denom = 2 * m1 + m2 - m2 * Math.cos(2 * theta1 - 2 * theta2)
+
+  const a1 =
+    (-g * (2 * m1 + m2) * Math.sin(theta1) -
+      m2 * g * Math.sin(theta1 - 2 * theta2) -
+      2 * Math.sin(d) * m2 * (omega2 * omega2 * L2 + omega1 * omega1 * L1 * Math.cos(d))) /
+    (L1 * denom)
+
+  const a2 =
+    (2 *
+      Math.sin(d) *
+      (omega1 * omega1 * L1 * (m1 + m2) +
+        g * (m1 + m2) * Math.cos(theta1) +
+        omega2 * omega2 * L2 * m2 * Math.cos(d))) /
+    (L2 * denom)
+
+  return [omega1, a1, omega2, a2]
+}
+
+function rk4(state, dt) {
+  const k1 = derivs(state)
+  const s2 = state.map((value, i) => value + 0.5 * dt * k1[i])
+  const k2 = derivs(s2)
+  const s3 = state.map((value, i) => value + 0.5 * dt * k2[i])
+  const k3 = derivs(s3)
+  const s4 = state.map((value, i) => value + dt * k3[i])
+  const k4 = derivs(s4)
+
+  return state.map((value, i) => value + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]))
+}
+
+function createPendulums() {
+  const count = Math.max(1, Math.min(9, numPendulums.value))
+  const startAngle = (90 * Math.PI) / 180
+  const spread = Math.max(0, angleSpread.value)
+  const center = (count - 1) / 2
+
+  pendulums = Array.from({ length: count }, (_, index) => {
+    const phase = (index - center) * (spread * Math.PI) / 180
+
+    return {
+      theta1: startAngle + phase,
+      omega1: 0,
+      theta2: startAngle + phase * 0.85,
+      omega2: 0,
+      hue: 150 + index * 18,
+    }
+  })
+}
+
+function stepPendulums(dt) {
+  pendulums = pendulums.map((item) => {
+    const next = rk4([item.theta1, item.omega1, item.theta2, item.omega2], dt)
+    return {
+      ...item,
+      theta1: next[0],
+      omega1: next[1],
+      theta2: next[2],
+      omega2: next[3],
+    }
+  })
+}
+
+function drawPendulum(item) {
+  const L1 = ROD_LEN_1 * 0.92
+  const L2 = ROD_LEN_2 * 0.92
+  const anchorX = WIDTH / 2
+  const anchorY = 46
+
+  const bob1 = {
+    x: anchorX + L1 * Math.sin(item.theta1),
+    y: anchorY + L1 * Math.cos(item.theta1),
+  }
+
+  const bob2 = {
+    x: bob1.x + L2 * Math.sin(item.theta2),
+    y: bob1.y + L2 * Math.cos(item.theta2),
+  }
+
+  ctx.strokeStyle = `hsla(${item.hue}, 85%, 68%, 0.35)`
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(anchorX, anchorY)
+  ctx.lineTo(bob1.x, bob1.y)
+  ctx.lineTo(bob2.x, bob2.y)
+  ctx.stroke()
+
+  ctx.fillStyle = `hsla(${item.hue}, 70%, 62%, 0.95)`
+  ctx.beginPath()
+  ctx.arc(anchorX, anchorY, 3.2, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.arc(bob1.x, bob1.y, BOB_RADIUS, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = `hsla(${item.hue + 15}, 85%, 72%, 0.95)`
+  ctx.beginPath()
+  ctx.arc(bob2.x, bob2.y, BOB_RADIUS, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+function render() {
+  if (!ctx) return
+
+  ctx.clearRect(0, 0, WIDTH, HEIGHT)
+  ctx.fillStyle = '#0b0d12'
+  ctx.fillRect(0, 0, WIDTH, HEIGHT)
+
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(0, HEIGHT * 0.72)
+  ctx.lineTo(WIDTH, HEIGHT * 0.72)
+  ctx.stroke()
+
+  pendulums.forEach((item) => drawPendulum(item))
+}
+
+function loop() {
+  if (isRunning.value) {
+    stepPendulums(1 / 60)
+  }
+  render()
+  rafId = window.requestAnimationFrame(loop)
+}
+
+function togglePreview() {
+  isRunning.value = !isRunning.value
+}
+
+function resetPreview() {
+  isRunning.value = true
+  createPendulums()
+  render()
+}
+
+onMounted(() => {
+  requestAnimationFrame(() => typesetMath())
+  window.addEventListener('load', typesetMath)
+
+  const canvas = canvasRef.value
+  ctx = canvas?.getContext('2d')
+  if (!ctx || !canvas) return
+
+  canvas.width = Math.floor(WIDTH * DPR)
+  canvas.height = Math.floor(HEIGHT * DPR)
+  canvas.style.width = `${WIDTH}px`
+  canvas.style.height = `${HEIGHT}px`
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
+  ctx.imageSmoothingEnabled = true
+
+  createPendulums()
+  render()
+  rafId = window.requestAnimationFrame(loop)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('load', typesetMath)
+  if (rafId) window.cancelAnimationFrame(rafId)
+  rafId = null
+  ctx = null
+})
+
+watch([numPendulums, angleSpread], () => {
+  createPendulums()
+  render()
+})
+</script>
 
 <template>
-  <section class="info-panel">
-    <h2>Physics Behind the Simulation</h2>
+  <section ref="infoPanelRef" class="info-panel">
+    <h2 style="font-size: 1.8rem;">Physics Behind the Simulation</h2>
+
+    
+    <!-- § 5 -->
+    <div class="section-block">
+      <h3>Chaos Theory</h3>
+      <p>
+        The double pendulum is one of the simplest examples of a chaotic system. Even though
+        the equations are perfectly deterministic, two trajectories with nearly identical starting
+        angles diverge exponentially fast. This is the pinnacle of chaos: sensitivity to initial conditions.
+      </p>
+      <div class="mini-sim-card">
+      <div class="mini-sim-copy">
+        <h3 style="font-size: 1.2rem;">Mini Simulation</h3>
+        <p>
+          This shows several double-pendulum copies on top of one another with a very small
+          offset so you can see the chaotic motion.
+        </p>
+      </div>
+      <div class="mini-sim-grid">
+        <canvas ref="canvasRef" :width="WIDTH" :height="HEIGHT" class="mini-canvas" />
+        <div class="mini-controls">
+          <label>
+            <span>Angle spread (°)</span>
+            <strong>{{ angleSpread.toFixed(3) }}°</strong>
+            <input v-model.number="angleSpread" type="range" min="0.001" max="1" step="0.001" />
+          </label>
+          <label>
+            <span>Pendulums</span>
+            <strong>{{ numPendulums }}</strong>
+            <input v-model.number="numPendulums" type="range" min="1" max="9" step="1" />
+          </label>
+          <div class="mini-actions">
+            <button type="button" class="mini-reset" @click="togglePreview">{{ isRunning ? 'Stop' : 'Start' }}</button>
+            <button type="button" class="mini-reset" @click="resetPreview">Reset view</button>
+          </div>
+        </div>
+      </div>
+      </div>
+      <p>
+        This divergence rate is quantified by the Lyapunov
+        exponent λ:
+      </p>
+      <div class="eq-block">
+        <span class="mathjax">$$|\delta y(t)| \approx |\delta y_0| e^{\lambda t}$$</span>
+      </div>
+      
+      <p>
+        δy₀ is the initial separation between two trajectories. Because λ &gt; 0, tiny
+        measurement errors grow without bound. This causes long-term prediction to be fundamentally impossible
+        regardless of computing power. 
+      </p>
+      <p class="callout">
+        Chaos does not mean randomness. The system is still fully deterministic: given exact initial
+        conditions, the trajectory is perfectly defined. Chaos means sensitivity to initial conditions.
+        In reality, we can never know positions infinitely precisely, so long-term behaviour becomes
+        unpredictable.
+      </p>
+      
+    </div>
 
     <!-- § 1 -->
     <div class="section-block">
-      <h3>§ 1 — System Setup &amp; Coordinates</h3>
+      <h3>1 — System Setup &amp; Coordinates</h3>
       <p>
         A double pendulum consists of two rigid, massless rods. The first rod of length L₁ has a point
-        mass m₁ at its tip; a second rod of length L₂ with mass m₂ hangs from that tip. The pivot is
-        fixed to a ceiling.
+        mass m₁ at its tip; a second rod of length L₂ with mass m₂ hangs from that tip.
       </p>
       <p>
         We describe the system using two generalised coordinates: θ₁ and θ₂, the angles each rod makes
         with the vertical. The Cartesian positions of each mass follow directly:
       </p>
       <div class="eq-block">
-        <span>x₁ = L₁ sin θ₁ &nbsp;&nbsp; y₁ = −L₁ cos θ₁</span>
-        <span>x₂ = x₁ + L₂ sin θ₂ &nbsp;&nbsp; y₂ = y₁ − L₂ cos θ₂</span>
+        <span class="mathjax">$$x_1 = L_1 \sin\theta_1$$</span>
+        <span class="mathjax">$$y_1 = -L_1 \cos\theta_1$$</span>
+        <span class="mathjax">$$x_2 = x_1 + L_2 \sin\theta_2$$</span>
+        <span class="mathjax">$$y_2 = y_1 - L_2 \cos\theta_2$$</span>
       </div>
-      <table class="var-table">
-        <thead><tr><th>Symbol</th><th>Meaning</th><th>Units</th></tr></thead>
-        <tbody>
-          <tr><td>θ₁, θ₂</td><td>Angles from vertical for each bob</td><td>rad</td></tr>
-          <tr><td>L₁, L₂</td><td>Rod lengths</td><td>m</td></tr>
-          <tr><td>m₁, m₂</td><td>Point masses</td><td>kg</td></tr>
-          <tr><td>g</td><td>Gravitational acceleration</td><td>m/s²</td></tr>
-          <tr><td>T</td><td>Total kinetic energy</td><td>J</td></tr>
-          <tr><td>V</td><td>Total potential energy</td><td>J</td></tr>
-          <tr><td>ℒ</td><td>Lagrangian = T − V</td><td>J</td></tr>
-        </tbody>
-      </table>
+      
     </div>
 
     <!-- § 2 -->
     <div class="section-block">
-      <h3>§ 2 — The Lagrangian</h3>
+      <h3>2 — The Lagrangian</h3>
       <p>
         Instead of resolving forces like Newton's approach, Lagrangian mechanics builds equations from
         energy alone. This is especially powerful for constrained systems like pendulums, where
         constraint forces (rod tension) do no work and drop out automatically.
       </p>
+
+      
+      <div class="eq-block">
+        <span class="mathjax">$$\mathcal{L} = T - V$$</span>
+      </div>
+
+      <table class="var-table">
+        <thead><tr><th>Symbol</th><th>Meaning</th><th>Units</th></tr></thead>
+        <tbody>
+          
+          <tr><td>T</td><td>Total kinetic energy</td><td>J</td></tr>
+          <tr><td>V</td><td>Total potential energy</td><td>J</td></tr>
+          <tr><td>ℒ</td><td>Lagrangian</td><td>J</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size: .1em;"> &nbsp;</p>
       <p>
-        Differentiating the position equations gives velocities. The speed of m₁ is simply
-        v₁² = L₁²θ̇₁². For m₂, the velocity involves contributions from both rods:
+        Differentiating the position equations gives velocities. The first mass has only one velocity component, but the second mass's velocity depends on both θ₁ and θ₂:
       </p>
       <div class="eq-block">
-        <span>v₂² = L₁²θ̇₁² + L₂²θ̇₂² + 2L₁L₂ θ̇₁θ̇₂ cos(θ₁ − θ₂)</span>
+        <span class="mathjax">$$v_1^2 = L_1^2 \dot{\theta}_1^2$$</span>
+      </div>
+      <div class="eq-block">
+        <span class="mathjax">$$v_2^2 = L_1^2 \dot{\theta}_1^2 + L_2^2 \dot{\theta}_2^2 + 2L_1L_2 \dot{\theta}_1\dot{\theta}_2 \cos(\theta_1-\theta_2)$$</span>
       </div>
       <p>
-        The cross-term 2L₁L₂ θ̇₁θ̇₂ cos(θ₁ − θ₂) is the key coupling between the two bobs — it is
-        what makes this system interesting and what prevents any clean analytical solution.
+        After some algebra, the total kinetic energy for both masses is:
       </p>
-      <p>Total kinetic energy:</p>
+  
+      
       <div class="eq-block">
-        <span>T = ½(m₁+m₂)L₁²θ̇₁² + ½m₂L₂²θ̇₂² + m₂L₁L₂ θ̇₁θ̇₂ cos(θ₁−θ₂)</span>
+        <span class="mathjax">$$T = \tfrac12 (m_1+m_2)L_1^2 \dot{\theta}_1^2 + \tfrac12 m_2L_2^2 \dot{\theta}_2^2 + m_2L_1L_2 \dot{\theta}_1\dot{\theta}_2 \cos(\theta_1-\theta_2)$$</span>
       </div>
       <p>Taking the pivot as the reference height, total potential energy:</p>
       <div class="eq-block">
-        <span>V = −(m₁+m₂)gL₁ cos θ₁ − m₂gL₂ cos θ₂</span>
+        <span class="mathjax">$$V = -(m_1+m_2)gL_1 \cos\theta_1 - m_2gL_2 \cos\theta_2$$</span>
       </div>
+
+
       <p>The Lagrangian ℒ = T − V:</p>
       <div class="eq-block">
-        <span>ℒ = ½(m₁+m₂)L₁²θ̇₁² + ½m₂L₂²θ̇₂²</span>
-        <span>&nbsp;&nbsp;&nbsp;&nbsp;+ m₂L₁L₂ θ̇₁θ̇₂ cos(θ₁−θ₂)</span>
-        <span>&nbsp;&nbsp;&nbsp;&nbsp;+ (m₁+m₂)gL₁ cos θ₁ + m₂gL₂ cos θ₂</span>
+        <span class="mathjax">$$\mathcal{L} = \tfrac12(m_1+m_2)L_1^2 \dot{\theta}_1^2 + \tfrac12 m_2L_2^2 \dot{\theta}_2^2+ m_2L_1L_2 \dot{\theta}_1\dot{\theta}_2 \cos(\theta_1-\theta_2) + (m_1+m_2)gL_1 \cos\theta_1 + m_2gL_2 \cos\theta_2$$</span>
       </div>
     </div>
 
     <!-- § 3 -->
     <div class="section-block">
-      <h3>§ 3 — Equations of Motion</h3>
-      <p>The Euler–Lagrange equation is applied separately for each generalised coordinate qᵢ:</p>
+      <h3>3 — Equations of Motion</h3>
+      <p>The Euler–Lagrange equation is the foundation of Lagrangian mechanics. It uses the system's energy to derive the equations of motion, allowing us to calculate the angular accelerations of the double pendulum at every moment in time.</p>
+      <p>The equation is applied separately for each generalised coordinate qᵢ (in our case that is θ₁ and θ₂):</p>
       <div class="eq-block">
-        <span>d/dt (∂ℒ/∂q̇ᵢ) − ∂ℒ/∂qᵢ = 0</span>
+        <span class="mathjax">$$\frac{d}{dt}\left(\frac{\partial \mathcal{L}}{\partial \dot q_i}\right) - \frac{\partial \mathcal{L}}{\partial q_i} = 0$$</span>
       </div>
+      <p class="callout">
+        A partial derivative is just a derivative where you change one variable at a time and pretend all the others are constant.
+      </p>
       <p>
         Applying this for θ₁ and θ₂ and solving for the angular accelerations gives two coupled,
         nonlinear ODEs:
       </p>
       <div class="eq-block">
-        <span>θ̈₁ = [ −g(2m₁+m₂) sin θ₁ − m₂g sin(θ₁−2θ₂)</span>
-        <span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;− 2 sin(θ₁−θ₂) · m₂(L₂θ̇₂² + L₁θ̇₁² cos(θ₁−θ₂)) ]</span>
-        <span>&nbsp;&nbsp;&nbsp;&nbsp;/ [ L₁(2m₁+m₂ − m₂ cos(2θ₁−2θ₂)) ]</span>
+        <span class="mathjax">$$\ddot{\theta}_1 = \frac{-g(2m_1+m_2)\sin\theta_1 - m_2g\sin(\theta_1-2\theta_2) - 2\sin(\theta_1-\theta_2)\,m_2(L_2\dot{\theta}_2^2 + L_1\dot{\theta}_1^2\cos(\theta_1-\theta_2))}{L_1(2m_1+m_2-m_2\cos(2\theta_1-2\theta_2))}$$</span>
       </div>
       <div class="eq-block">
-        <span>θ̈₂ = [ 2 sin(θ₁−θ₂) · ((m₁+m₂)(L₁θ̇₁² + g cos θ₁)</span>
-        <span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ L₂m₂θ̇₂² cos(θ₁−θ₂)) ]</span>
-        <span>&nbsp;&nbsp;&nbsp;&nbsp;/ [ L₂(2m₁+m₂ − m₂ cos(2θ₁−2θ₂)) ]</span>
+        <span class="mathjax">$$\ddot{\theta}_2 = \frac{2\sin(\theta_1-\theta_2)\Big((m_1+m_2)(L_1\dot{\theta}_1^2 + g\cos\theta_1) + L_2m_2\dot{\theta}_2^2\cos(\theta_1-\theta_2)\Big)}{L_2(2m_1+m_2-m_2\cos(2\theta_1-2\theta_2))}$$</span>
       </div>
       <p>
         These equations are coupled (θ̈₁ depends on θ₂ and θ̇₂, and vice versa) and nonlinear
         (products and trig functions of the angles appear throughout). No closed-form analytical
         solution exists, so we must integrate them numerically.
       </p>
-      <p class="callout">
-        You could use Newton's laws instead, but you would need to track tension forces in both rods
-        and resolve them in two dimensions each. The Lagrangian approach lets you ignore constraint
-        forces entirely — you only ever differentiate one scalar function.
-      </p>
+      
     </div>
 
     <!-- § 4 -->
     <div class="section-block">
-      <h3>§ 4 — Numerical Integration</h3>
+      <h3>4 — Numerical Integration</h3>
+      <p>Numerical integration is a method for approximating the solution of differential equations using small time steps.</p>
       <p>
         To simulate the system, we convert the two second-order ODEs into a system of four first-order
         ODEs by introducing state variables. Define the state vector:
       </p>
       <div class="eq-block">
-        <span>y = [θ₁, ω₁, θ₂, ω₂]ᵀ &nbsp; where ωᵢ = θ̇ᵢ</span>
+        <span class="mathjax">$$y = [\theta_1, \omega_1, \theta_2, \omega_2]^T \quad \text{where } \omega_i = \dot{\theta}_i$$</span>
       </div>
       <p>
         Then ẏ = f(y), where f uses the θ̈ expressions from §3. We step this forward in time.
@@ -120,7 +390,7 @@
         by timestep h:
       </p>
       <div class="eq-block">
-        <span>y(t + h) = y(t) + h · f(y(t))</span>
+        <span class="mathjax">$$y(t+h) = y(t) + h\,f(y(t))$$</span>
       </div>
       <p>
         It is simple but accumulates error — energy is not conserved over long runs. For chaotic
@@ -131,12 +401,11 @@
         evaluates the derivative at four intermediate points per step and takes a weighted average:
       </p>
       <div class="eq-block">
-        <span>k₁ = f(yₙ)</span>
-        <span>k₂ = f(yₙ + h/2 · k₁)</span>
-        <span>k₃ = f(yₙ + h/2 · k₂)</span>
-        <span>k₄ = f(yₙ + h · k₃)</span>
-        <span>&nbsp;</span>
-        <span>yₙ₊₁ = yₙ + (h/6)(k₁ + 2k₂ + 2k₃ + k₄)</span>
+        <span class="mathjax">$$k_1 = f(y_n)$$</span>
+        <span class="mathjax">$$k_2 = f\left(y_n + \frac h2 k_1\right)$$</span>
+        <span class="mathjax">$$k_3 = f\left(y_n + \frac h2 k_2\right)$$</span>
+        <span class="mathjax">$$k_4 = f(y_n + h k_3)$$</span>
+        <span class="mathjax">$$y_{n+1} = y_n + \frac h6 (k_1 + 2k_2 + 2k_3 + k_4)$$</span>
       </div>
       <p>
         RK4 has local truncation error O(h⁵) and global error O(h⁴), which is massively better than
@@ -147,43 +416,7 @@
       </p>
     </div>
 
-    <!-- § 5 -->
-    <div class="section-block">
-      <h3>§ 5 — Chaos &amp; Sensitivity</h3>
-      <p>
-        The double pendulum is one of the simplest examples of a chaotic dynamical system. Even though
-        the equations are perfectly deterministic, two trajectories with nearly identical starting
-        angles diverge exponentially fast. This divergence rate is quantified by the Lyapunov
-        exponent λ:
-      </p>
-      <div class="eq-block">
-        <span>|δy(t)| ≈ |δy₀| · e^(λt)</span>
-      </div>
-      <p>
-        Here δy₀ is the initial separation between two trajectories. Because λ &gt; 0, tiny
-        measurement errors grow without bound — long-term prediction is fundamentally impossible
-        regardless of computing power.
-      </p>
-      <p class="callout">
-        Chaos does not mean randomness. The system is still fully deterministic: given exact initial
-        conditions, the trajectory is perfectly defined. Chaos means sensitivity to initial conditions.
-        In practice, we can never know positions infinitely precisely, so long-term behaviour becomes
-        unpredictable.
-      </p>
-      <p>
-        Because there is no friction or damping, total mechanical energy E = T + V must remain
-        constant throughout the simulation. Monitoring energy drift is the standard way to check
-        integrator accuracy:
-      </p>
-      <div class="eq-block">
-        <span>εᵣₑₗ(t) = |E(t) − E(0)| / |E(0)| ≪ 1</span>
-      </div>
-      <p>
-        If εᵣₑₗ grows over time, your timestep is too large or your integrator is too low-order. RK4
-        with h ≈ 0.01 s typically keeps relative energy error below 10⁻⁵ for several hundred seconds
-        of simulation.
-      </p>
-    </div>
+    
 
   </section>
 </template>
@@ -222,7 +455,7 @@
 }
 
 h3 {
-  font-size: 0.9rem;
+  font-size: 1.3rem;
   font-weight: 600;
   color: #41b883;
   margin: 0 0 0.7rem 0;
@@ -239,7 +472,7 @@ h3 {
   padding: 0.65rem 1rem;
   margin: 0.75rem 0;
   font-family: 'JetBrains Mono', 'Fira Mono', 'Courier New', monospace;
-  font-size: 0.82rem;
+  font-size: 1.03rem;
   color: #e2e8f0;
   overflow-x: auto;
 }
@@ -292,5 +525,91 @@ h3 {
 
 strong {
   color: #f9fafb;
+}
+
+.mini-sim-card {
+  margin: 1rem 0 1.2rem;
+  padding: 0.95rem;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #111827 0%, #0b0f17 100%);
+}
+
+.mini-sim-copy h3 {
+  margin: 0 0 0.35rem;
+  color: #41b883;
+  font-size: 0.95rem;
+}
+
+.mini-sim-copy p {
+  margin: 0 0 0.9rem;
+  color: #d1d5db;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.mini-sim-grid {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 0.9rem;
+  align-items: center;
+}
+
+.mini-canvas {
+  width: 360px;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid #1f2937;
+  background: #090d13;
+}
+
+.mini-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.mini-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: #e5e7eb;
+  font-size: 0.82rem;
+}
+
+.mini-controls strong {
+  color: #41b883;
+  font-size: 0.9rem;
+}
+
+.mini-controls input[type='range'] {
+  accent-color: #41b883;
+}
+
+.mini-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.mini-reset {
+  border: 1px solid #374151;
+  border-radius: 6px;
+  background: #111827;
+  color: #e5e7eb;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.mini-reset:hover {
+  background: #18212d;
+}
+
+@media (max-width: 840px) {
+  .mini-sim-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
