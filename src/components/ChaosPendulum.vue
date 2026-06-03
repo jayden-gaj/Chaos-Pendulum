@@ -22,8 +22,15 @@ const axisOptions = [
   { value: 'omega1', label: 'Velocity 1 (rad/s)' },
   { value: 'omega2', label: 'Velocity 2 (rad/s)' },
   { value: 'time', label: 'Time (s)' },
-  { value: 'energy', label: 'Energy' },
+  { value: 'energy', label: 'Energy (J)' },
 ]
+
+const integratorOptions = [
+  { value: 'rk4', label: 'Runge-Kutta 4' },
+  { value: 'euler-cromer', label: 'Euler-Cromer' },
+  { value: 'euler', label: 'Euler' },
+]
+const integrator = ref('rk4')
 
 const xAxis = ref('theta1')
 const yAxis = ref('omega1')
@@ -101,6 +108,33 @@ function rk4(state, dt) {
   return state.map(
     (x, i) => x + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i])
   )
+}
+
+// Forward (explicit) Euler — simplest, but injects energy and drifts fast.
+function euler(state, dt) {
+  const k = derivs(state)
+  return state.map((x, i) => x + dt * k[i])
+}
+
+// Euler-Cromer (semi-implicit) — advance velocities first, then use the
+// updated velocities to advance positions. Much better energy behaviour.
+function eulerCromer(state, dt) {
+  const [t1, w1, t2, w2] = state
+  const [, a1, , a2] = derivs(state)
+  const nw1 = w1 + dt * a1
+  const nw2 = w2 + dt * a2
+  return [t1 + dt * nw1, nw1, t2 + dt * nw2, nw2]
+}
+
+function step(state, dt) {
+  switch (integrator.value) {
+    case 'euler':
+      return euler(state, dt)
+    case 'euler-cromer':
+      return eulerCromer(state, dt)
+    default:
+      return rk4(state, dt)
+  }
 }
 
 function getRenderScale() {
@@ -224,7 +258,7 @@ function loop() {
   if (running.value && !dragging) {
     const dt = FRAME_DT / SUBSTEPS
     for (let i = 0; i < SUBSTEPS; i++) {
-      const next = rk4([theta1, omega1, theta2, omega2], dt)
+      const next = step([theta1, omega1, theta2, omega2], dt)
       theta1 = next[0]
       omega1 = next[1]
       theta2 = next[2]
@@ -526,17 +560,25 @@ onBeforeUnmount(teardown)
         <div class="params">
           <fieldset>
             <legend>Upper arm</legend>
-            <label>Rod length <input type="number" v-model.number="rodLen1" min="20" max="200" step="5"></label>
-            <label>Ball mass <input type="number" v-model.number="mass1" min="0.1" max="50" step="0.5"></label>
+            <label>Rod length (meters) <input type="number" v-model.number="rodLen1" min="20" max="200" step="5"></label>
+            <label>Ball mass (kg) <input type="number" v-model.number="mass1" min="0.1" max="50" step="0.5"></label>
           </fieldset>
           <fieldset>
             <legend>Lower arm</legend>
-            <label>Rod length <input type="number" v-model.number="rodLen2" min="20" max="200" step="5"></label>
-            <label>Ball mass <input type="number" v-model.number="mass2" min="0.1" max="50" step="0.5"></label>
+            <label>Rod length (meters) <input type="number" v-model.number="rodLen2" min="20" max="200" step="5"></label>
+            <label>Ball mass (kg) <input type="number" v-model.number="mass2" min="0.1" max="50" step="0.5"></label>
           </fieldset>
           <fieldset>
             <legend>Start angle (deg)</legend>
             <label>θ <input type="number" v-model.number="startAngleDeg" min="-180" max="180" step="1"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Integration method</legend>
+            <label>Method
+              <select v-model="integrator">
+                <option v-for="option in integratorOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
           </fieldset>
         </div>
         <div class="controls">
@@ -681,6 +723,19 @@ h1 {
   font-size: 0.8rem;
 }
 .params input[type="number"]:focus {
+  outline: none;
+  border-color: #41b883;
+}
+.params select {
+  background: #0b0d12;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font: inherit;
+  font-size: 0.8rem;
+}
+.params select:focus {
   outline: none;
   border-color: #41b883;
 }
