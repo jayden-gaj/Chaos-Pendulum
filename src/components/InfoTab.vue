@@ -368,37 +368,76 @@ watch([numPendulums, angleSpread], () => {
         (products and trig functions of the angles appear throughout). No closed-form analytical
         solution exists, so we must integrate them numerically.
       </p>
-      
+      <div class="eq-block">
+        <span class="mathjax">$$\ddot{\theta}_1 = f_1\!\left(\theta_1,\theta_2,\dot{\theta}_1,\dot{\theta}_2\right)$$</span>
+        <span class="mathjax">$$\ddot{\theta}_2 = f_2\!\left(\theta_1,\theta_2,\dot{\theta}_1,\dot{\theta}_2\right)$$</span>
+      </div>
     </div>
 
     <!-- § 4 -->
     <div class="section-block">
       <h3>4 — Numerical Integration</h3>
-      <p>Numerical integration is a method for approximating the solution of differential equations using small time steps.</p>
       <p>
-        To simulate the system, we convert the two second-order ODEs into a system of four first-order
-        ODEs by introducing state variables. Define the state vector:
+        Numerical integration turns the continuous equations of motion into a sequence of small
+        updates. For the double pendulum, the two second-order ODEs (Ordinary Differential Equations) are rewritten as four first-order
+        ODEs by introducing the angular velocities as extra state variables.
+      </p>
+
+      <div class="eq-block">
+        <span class="mathjax">$$y =
+\begin{bmatrix}
+\theta_1 \\
+\theta_2 \\
+\omega_1 \\
+\omega_2
+\end{bmatrix},
+\qquad \omega_i = \dot{\theta}_i$$</span>
+      </div>
+
+      <p>
+        With this definition, the system becomes \(\dot y = f(y)\), where the derivative returns
+        \([\omega_1,\omega_2,\alpha_1,\alpha_2]\). The accelerations \(\alpha_i = \ddot{\theta}_i\)
+        come directly from the coupled expressions in Section 3.
+      </p>
+
+      <p class="callout">
+        An ODE is an equation that relates a function to one or more of its derivatives. A state vector
+        stores everything the future evolution depends on at a given instant: the two angles and the
+        two angular velocities.
+      </p>
+
+      <p>
+        <strong>Explicit Euler</strong> is the simplest update rule. Given a state yₙ at time tₙ and a
+        timestep h, it advances the whole state in one forward step:
       </p>
       <div class="eq-block">
-        <span class="mathjax">$$y = [\theta_1, \omega_1, \theta_2, \omega_2]^T \quad \text{where } \omega_i = \dot{\theta}_i$$</span>
+        <span class="mathjax">$$y_{n+1} = y_n + h\,f(y_n)$$</span>
       </div>
       <p>
-        Then ẏ = f(y), where f uses the θ̈ expressions from §3. We step this forward in time.
+        In component form this means the next angles and angular velocities are estimated from the
+        current derivative. This is easy to implement, but for a chaotic system such as the double
+        pendulum it drifts quickly and tends to lose energy over long runs.
       </p>
+
       <p>
-        <strong>Euler's Method</strong> is the simplest integrator. Given state y at time t, advance
-        by timestep h:
+        <strong>Euler–Cromer</strong> (also called semi-implicit Euler) improves the stability of the
+        simple method by updating the velocity first and then using that improved velocity to update the
+        position. For the pendulum variables this becomes:
       </p>
       <div class="eq-block">
-        <span class="mathjax">$$y(t+h) = y(t) + h\,f(y(t))$$</span>
+        <span class="mathjax">$$\omega_{1,n+1} = \omega_{1,n} + h\,\alpha_1(y_n)$$</span>
+        <span class="mathjax">$$\theta_{1,n+1} = \theta_{1,n} + h\,\omega_{1,n+1}$$</span>
+        <span class="mathjax">$$\omega_{2,n+1} = \omega_{2,n} + h\,\alpha_2(y_n)$$</span>
+        <span class="mathjax">$$\theta_{2,n+1} = \theta_{2,n} + h\,\omega_{2,n+1}$$</span>
       </div>
       <p>
-        It is simple but accumulates error — energy is not conserved over long runs. For chaotic
-        systems like this, errors compound quickly.
+        This is often much more stable because the position update
+        uses the latest velocity rather than the old one. It is not as accurate as RK4, but it is a useful middle ground between simplicity and robustness.
       </p>
+
       <p>
-        <strong>Runge–Kutta 4 (RK4)</strong> is the standard for most physics simulations. It
-        evaluates the derivative at four intermediate points per step and takes a weighted average:
+        <strong>Runge–Kutta 4 (RK4)</strong> is the standard choice for most physics simulations. It
+        samples the derivative at four intermediate points and combines them with weighted averages:
       </p>
       <div class="eq-block">
         <span class="mathjax">$$k_1 = f(y_n)$$</span>
@@ -408,15 +447,117 @@ watch([numPendulums, angleSpread], () => {
         <span class="mathjax">$$y_{n+1} = y_n + \frac h6 (k_1 + 2k_2 + 2k_3 + k_4)$$</span>
       </div>
       <p>
-        RK4 has local truncation error O(h⁵) and global error O(h⁴), which is massively better than
-        Euler's O(h²). For the same accuracy you can use a much larger timestep. The simulation loop
-        works as follows: initialise [θ₁, ω₁, θ₂, ω₂] from starting conditions, compute θ̈ from the
-        equations of motion, run one RK4 step, convert θ₁ and θ₂ to Cartesian coordinates to draw
-        the frame, then repeat.
+        RK4 is much more accurate than either
+        Euler variant. In this app, the animation loop starts from the chosen
+        initial angles and angular velocities, computes the accelerations from Section 3, takes one RK4
+        step, converts the updated angles into Cartesian coordinates for drawing, and repeats the cycle
+        for each frame.
       </p>
     </div>
 
-    
+    <!-- § 5 -->
+    <div class="section-block">
+      <h3>5 — The Code</h3>
+      <p>
+        The simulator uses the same ideas directly in code:
+        derive the accelerations, choose an update rule, and repeat the step for every frame.
+      </p>
+
+      <p>
+        First, the current state \([\theta_1, \omega_1, \theta_2, \omega_2]\) is turned into the
+        derivative vector \([\omega_1, \alpha_1, \omega_2, \alpha_2]\):
+      </p>
+      <pre class="code-snippet"><code>function derivs(state) {
+  const [t1, w1, t2, w2] = state
+  const d = t1 - t2
+  const denom = 2 * m1 + m2 - m2 * Math.cos(2 * t1 - 2 * t2)
+
+  const a1 = (-g * (2 * m1 + m2) * Math.sin(t1) -
+    m2 * g * Math.sin(t1 - 2 * t2) -
+    2 * Math.sin(d) * m2 * (w2 * w2 * L2 + w1 * w1 * L1 * Math.cos(d))) /
+    (L1 * denom)
+
+  const a2 = (2 * Math.sin(d) *
+    (w1 * w1 * L1 * (m1 + m2) +
+      g * (m1 + m2) * Math.cos(t1) +
+      w2 * w2 * L2 * m2 * Math.cos(d))) /
+    (L2 * denom)
+
+  return [w1, a1, w2, a2]
+}</code></pre>
+
+      <p>
+        Next, the integrator uses that derivative to advance the state:
+      </p>
+      <pre class="code-snippet"><code>function euler(state, dt) {
+  const k = derivs(state)
+  return state.map((x, i) => x + dt * k[i])
+}</code></pre>
+
+      <pre class="code-snippet"><code>function rk4(state, dt) {
+  const k1 = derivs(state)
+  const s2 = state.map((x, i) => x + 0.5 * dt * k1[i])
+  const k2 = derivs(s2)
+  const s3 = state.map((x, i) => x + 0.5 * dt * k2[i])
+  const k3 = derivs(s3)
+  const s4 = state.map((x, i) => x + dt * k3[i])
+  const k4 = derivs(s4)
+
+  return state.map((x, i) =>
+    x + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i])
+  )
+}</code></pre>
+
+      <pre class="code-snippet"><code>function eulerCromer(state, dt) {
+  const [t1, w1, t2, w2] = state
+  const [, a1, , a2] = derivs(state)
+  const nw1 = w1 + dt * a1
+  const nw2 = w2 + dt * a2
+
+  return [t1 + dt * nw1, nw1, t2 + dt * nw2, nw2]
+}</code></pre>
+
+      <p>
+        Finally, the main simulation loop simply chooses the integrator and applies it frame by frame:
+      </p>
+      <pre class="code-snippet"><code>function step(state, dt) {
+  switch (integrator.value) {
+    case 'euler':
+      return euler(state, dt)
+    case 'euler-cromer':
+      return eulerCromer(state, dt)
+    default:
+      return rk4(state, dt)
+  }
+}</code></pre>
+
+      <p>
+        Once the state has been updated, the same variables are used to draw the pendulum arms and
+        bobs on screen. This is where the maths becomes visible animation:
+      </p>
+      <pre class="code-snippet"><code>function getPositions() {
+  const s = getRenderScale()
+  const L1 = rodLen1.value * s
+  const L2 = rodLen2.value * s
+
+  const bob1 = {
+    x: ANCHOR.x + L1 * Math.sin(theta1),
+    y: ANCHOR.y + L1 * Math.cos(theta1),
+  }
+
+  const bob2 = {
+    x: bob1.x + L2 * Math.sin(theta2),
+    y: bob1.y + L2 * Math.cos(theta2),
+  }
+
+  return { bob1, bob2 }
+}</code></pre>
+
+      <p class="callout">
+        This is the direct bridge from the mathematics to the animation: the equations define the
+        derivatives, the integrator updates the state, and the render loop draws the new positions.
+      </p>
+    </div>
 
   </section>
 </template>
@@ -472,7 +613,7 @@ h3 {
   padding: 0.65rem 1rem;
   margin: 0.75rem 0;
   font-family: 'JetBrains Mono', 'Fira Mono', 'Courier New', monospace;
-  font-size: 1.03rem;
+  font-size: 1.2rem;
   color: #e2e8f0;
   overflow-x: auto;
 }
@@ -521,6 +662,19 @@ h3 {
   font-size: 0.88rem;
   line-height: 1.5;
   margin: 0.75rem 0;
+}
+
+.code-snippet {
+  background: #090d13;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Mono', 'Courier New', monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #dbe4ee;
 }
 
 strong {
