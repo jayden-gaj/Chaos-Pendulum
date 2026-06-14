@@ -416,7 +416,7 @@ watch([numPendulums, angleSpread], () => {
       <p>
         In component form this means the next angles and angular velocities are estimated from the
         current derivative. This is easy to implement, but for a chaotic system such as the double
-        pendulum it drifts quickly and tends to lose energy over long runs.
+        pendulum it drifts quickly and tends to gain energy over long runs.
       </p>
 
       <p>

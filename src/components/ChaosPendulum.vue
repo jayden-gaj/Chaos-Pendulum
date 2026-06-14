@@ -22,9 +22,7 @@ const axisOptions = [
   { value: 'omega1', label: 'Velocity 1 (rad/s)' },
   { value: 'omega2', label: 'Velocity 2 (rad/s)' },
   { value: 'time', label: 'Time (s)' },
-  { value: 'kinetic', label: 'Kinetic Energy (J)' },
-  { value: 'potential', label: 'Potential Energy (J)' },
-  { value: 'energy', label: 'Total Energy (J)' },
+  { value: 'energy', label: 'Energy (J)' },
 ]
 
 const integratorOptions = [
@@ -162,7 +160,7 @@ function getPositions() {
   return { bob1, bob2 }
 }
 
-function computeKineticEnergy() {
+function computeEnergy() {
   const s = getRenderScale()
   const L1 = rodLen1.value * s
   const L2 = rodLen2.value * s
@@ -179,24 +177,10 @@ function computeKineticEnergy() {
   const v2x = v1x + L2 * omega2 * Math.cos(theta2)
   const v2y = v1y - L2 * omega2 * Math.sin(theta2)
 
-  return 0.5 * m1 * (v1x * v1x + v1y * v1y) + 0.5 * m2 * (v2x * v2x + v2y * v2y)
-}
+  const kinetic = 0.5 * m1 * (v1x * v1x + v1y * v1y) + 0.5 * m2 * (v2x * v2x + v2y * v2y)
+  const potential = GRAVITY * (m1 * (HEIGHT / 2 - y1) + m2 * (HEIGHT / 2 - y2)) / 100
 
-function computePotentialEnergy() {
-  const s = getRenderScale()
-  const L1 = rodLen1.value * s
-  const L2 = rodLen2.value * s
-  const m1 = mass1.value
-  const m2 = mass2.value
-
-  const y1 = L1 * Math.cos(theta1)
-  const y2 = y1 + L2 * Math.cos(theta2)
-
-  return GRAVITY * (m1 * (HEIGHT / 2 - y1) + m2 * (HEIGHT / 2 - y2)) / 100
-}
-
-function computeEnergy() {
-  return computeKineticEnergy() + computePotentialEnergy()
+  return kinetic + potential
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -294,8 +278,6 @@ function samplePhase() {
     theta2,
     omega1,
     omega2,
-    kinetic: computeKineticEnergy(),
-    potential: computePotentialEnergy(),
     energy: computeEnergy(),
   })
   if (phaseSamples.length > SAMPLE_LIMIT) phaseSamples.shift()
@@ -447,10 +429,6 @@ function getAxisValue(sample, key) {
       return sample.omega2
     case 'time':
       return sample.time
-    case 'kinetic':
-      return sample.kinetic
-    case 'potential':
-      return sample.potential
     case 'energy':
       return sample.energy
     default:
